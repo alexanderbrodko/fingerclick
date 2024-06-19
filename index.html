@@ -139,6 +139,12 @@ async function createCanvas(stream) {
 		if (data[col]) {
 			trainer.train([ { input: data[col].sample, output: [ e.ctrlKey ? 1 : 0 ] } ], { rate: e.ctrlKey ? 0.1 : 0.075 });
 
+			if (e.ctrlKey) {
+				data[col].positiveTrained = true;
+			} else {
+				data[col].negativeTrained = true;
+			}
+
 			let networkJSON = myNetwork.toJSON();
 			localStorage.setItem('myNetwork', JSON.stringify(networkJSON));
 		}
@@ -171,7 +177,7 @@ async function createCanvas(stream) {
 				trainer.train([ { input: sample, output: [ 0 ] } ], { rate: 0.05 });
 			}
 
-			data.unshift({ sample, predictionGood });
+			data.unshift({ sample, predictionGood, negativeTrained: negativeTraining.checked });
 
 			let maxSamples = can.width / XSCALE;
 			if (data.length > maxSamples) {
@@ -180,7 +186,7 @@ async function createCanvas(stream) {
 		}
 
 		for (let x = 0; x < data.length; x++) {
-			let { sample, predictionGood } = data[x];
+			let { sample, predictionGood, negativeTrained, positiveTrained } = data[x];
 
 			for (let y = 0; y < sample.length; y++) {
 				let value = sample[y],
@@ -193,23 +199,29 @@ async function createCanvas(stream) {
 					} else {
 						l = 1;
 					}
+				} else if (negativeTrained) {
+					if (value) {
+						l = value;
+					} else {
+						h = 0;
+						s = 0.5;
+						l = 0.3;
+					}
+				} else if (positiveTrained) {
+					if (value) {
+						l = value;
+					} else {
+						h = 120 / 360;
+						s = 0.5;
+						l = 0.5;
+					}
 				} else if (predictionGood) {
 					l = 0.6;
 				} else {
-					if (negativeTraining.checked) {
-						if (value) {
-							l = value;
-						} else {
-							h = 0;
-							s = 0.5;
-							l = 0.3;
-						}
+					if (value) {
+						l = 0.5;
 					} else {
-						if (value) {
-							l = 0.5;
-						} else {
-							l = 0;
-						}
+						l = 0;
 					}
 				}
 				drawRectangleHSL(imgData, x * XSCALE, can.height - y * YSCALE, XSCALE, YSCALE, h, s, l);
