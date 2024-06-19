@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/synaptic/1.1.4/synaptic.min.js" integrity="sha512-nPPVw7EH/K4lr+WhkZHqsR2ZxKB7ROCLGLLdmHGR4vHdv/c+fYluZACzQqRQWGD5ehCBnlrxHzrQYNwKT319bA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+	</head>
+	<body>
+		<button onclick="start()">Start using mic</button>
+		<script type="text/javascript">
+
+let myNetwork;
+
+try {
+	let loadedNetworkJSON = JSON.parse(localStorage.getItem('myNetwork'));
+	myNetwork = synaptic.Network.fromJSON(loadedNetworkJSON);
+} catch(e) {
+	let inputLayer = new synaptic.Layer(128);
+	let hiddenLayer = new synaptic.Layer(64);
+	let outputLayer = new synaptic.Layer(1);
+
+	inputLayer.project(hiddenLayer);
+	hiddenLayer.project(outputLayer);
+
+	myNetwork = new synaptic.Network({
+		input: inputLayer,
+		hidden: [hiddenLayer],
+		output: outputLayer
+	});
+}
+
+let trainer = new synaptic.Trainer(myNetwork);
+
+
+function downsample(array, targetSize) {
+	let currentSize = array.length;
+	let ratio = currentSize / targetSize;
+	let downsampled = [];
+
+	for(let i = 0; i < targetSize; i++) {
+		let start = Math.floor(i * ratio);
+		let end = Math.min(Math.ceil((i + 1) * ratio), currentSize);
+		let sum = 0;
+		for(let j = start; j < end; j++) {
+			sum += array[j];
+		}
+		downsampled.push(sum / (end - start));
+	}
+
+	return downsampled;
+}
+
+function getTrainingSample(data) {
+	return downsample(data, 256).slice(0, 128).map(value => value / 255);
+}
+
+async function createCanvas(stream) {
+	let context = new AudioContext();
+
+	document.body.innerHTML = '<span></span><input type="checkbox" /><br /><canvas height="1024" width="1024"></canvas><br /><button>Copy to clipboard</button>';
+
+	let can = document.querySelector('canvas'),
+		ctx = can.getContext('2d'),
+		help = document.querySelector('span'),
+		negative = document.querySelector('input'),
+		button = document.querySelector('button');
+
+	button.onclick = () => {
+		let networkJSON = myNetwork.toJSON();
+		let textarea = document.createElement("textarea");
+		textarea.value = JSON.stringify(networkJSON);
+		document.body.appendChild(textarea);
+		textarea.select();
+		document.execCommand('copy');
+		document.body.removeChild(textarea);
+	};
+
+	help.innerText = `Use LMB to mark spectrogram column as a negative sample, and CTRL+LMB as a positive sample. Click on spectrogram to save trained network in a localStorage. Use this checkbox when you need to train negative samples, and do not produce target sounds while it is checked:`;
+
+	let input = context.createMediaStreamSource(stream);
+	let analyser = context.createAnalyser();
+	analyser.fftSize = can.height * 2;
+	input.connect(analyser);
+
+	can.onmousemove = e => {
+		can.title = 'Col: ' + e.offsetX + '\nFreq: ' + Math.floor((can.height - e.offsetY) / analyser.fftSize * context.sampleRate);
+	};
+
+	let data = [];
+	can.onclick = e => {
+		if (data[e.offsetX]) {
+			trainer.train([ { input: data[e.offsetX], output: [ e.ctrlKey ? 1 : 0 ] } ], { rate: 0.2 });
+
+			let networkJSON = myNetwork.toJSON();
+			localStorage.setItem('myNetwork', JSON.stringify(networkJSON));
+		}
+	};
+
+	let isUpdating = true;
+	can.addEventListener('mouseover', () => isUpdating = false);
+	can.addEventListener('mouseout', () => isUpdating = true);
+
+	(function update() {
+		if (isUpdating) {
+			let freqByteData = new Uint8Array(can.height);
+			analyser.getByteFrequencyData(freqByteData);
+
+			let sample = getTrainingSample(freqByteData);
+			data.unshift(sample);
+			if (data.length > can.width) data.length = can.width;
+
+
+			if (negative.checked) {
+				trainer.train([ { input: sample, output: [ 0 ] } ], { rate: 0.02 });
+			}
+
+			ctx.drawImage(can, 1, 0);
+
+			let predictionGood = myNetwork.activate(sample)[0] > 0.9;
+
+			if (negative.checked && predictionGood) {
+				trainer.train([ { input: sample, output: [ 0 ] } ], { rate: 0.1 });
+			}
+
+			for (let i = 0; i < freqByteData.length; i++) {
+				let value = freqByteData[i] / 255;
+				if (predictionGood) {
+					ctx.fillStyle = `hsl(${250 - (value * 360) | 0}, 100%, 60%)`;
+				} else {
+					if (negative.checked) {
+						if (value) {
+							ctx.fillStyle = `hsl(${250 - (value * 360) | 0}, 100%, ${value}%)`;
+						} else {
+							ctx.fillStyle = '#400';
+						}
+					} else {
+						ctx.fillStyle = `hsl(${250 - (value * 360) | 0}, 100%, ${value ? 50 : 0}%)`;
+					}
+				}
+				ctx.fillRect(0, can.height - i, 1, 1);
+			}
+		}
+
+		setTimeout(update, 10);
+	})();
+}
+
+function start() {
+	navigator.getUserMedia({ audio: true }, createCanvas, e => alert(e));
+}
+
+		</script>
+	</body>
+</html>
+
