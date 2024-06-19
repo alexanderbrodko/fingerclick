@@ -2,6 +2,7 @@
 <html>
 	<head>
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/synaptic/1.1.4/synaptic.min.js" integrity="sha512-nPPVw7EH/K4lr+WhkZHqsR2ZxKB7ROCLGLLdmHGR4vHdv/c+fYluZACzQqRQWGD5ehCBnlrxHzrQYNwKT319bA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+		<script src="fingerclicknn.js"></script>
 	</head>
 	<body>
 		<button onclick="start()">Start using mic</button>
@@ -29,41 +30,62 @@ try {
 
 let trainer = new synaptic.Trainer(myNetwork);
 
+function hslToRgb(h, s, l) {
+    let r, g, b;
 
-function downsample(array, targetSize) {
-	let currentSize = array.length;
-	let ratio = currentSize / targetSize;
-	let downsampled = [];
+    if (s == 0) {
+        r = g = b = l;
+    } else {
+        function hue2rgb(p, q, t) {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+        }
 
-	for(let i = 0; i < targetSize; i++) {
-		let start = Math.floor(i * ratio);
-		let end = Math.min(Math.ceil((i + 1) * ratio), currentSize);
-		let sum = 0;
-		for(let j = start; j < end; j++) {
-			sum += array[j];
-		}
-		downsampled.push(sum / (end - start));
-	}
+        let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        let p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+    }
 
-	return downsampled;
+    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
 }
 
-function getTrainingSample(data) {
-	return downsample(data, 256).slice(0, 128).map(value => value / 255);
+function drawRectangleHSL(imgData, x, y, width, height, h, s, l) {
+    let endX = x + width,
+    	endY = y + height,
+    	{ r, g, b } = hslToRgb(h, s, l),
+    	data = imgData.data;
+
+    for (let iy = y; iy < endY; iy++) {
+        for (let ix = x; ix < endX; ix++) {
+            let pixelIndex = (iy * imgData.width + ix) * 4;
+            
+            data[pixelIndex + 0] = r;
+            data[pixelIndex + 1] = g;
+            data[pixelIndex + 2] = b;
+            data[pixelIndex + 3] = 255;
+        }
+    }
 }
 
 async function createCanvas(stream) {
 	let context = new AudioContext();
 
-	document.body.innerHTML = '<span></span><input type="checkbox" /><br /><canvas height="1024" width="1024"></canvas><br /><button>Copy to clipboard</button>';
+	document.body.innerHTML = '<span></span><input type="checkbox" /><br /><canvas height="512" width="1024"></canvas><br /><button onclick="copyNNToClipboard()">Copy to clipboard</button><button onclick="loadFingerClickNN()">Load Finger Click NN</button><button onclick="clearSavedNN()">Clear saved data</button>';
 
 	let can = document.querySelector('canvas'),
 		ctx = can.getContext('2d'),
+		imgData = ctx.createImageData(1024, 512),
 		help = document.querySelector('span'),
-		negative = document.querySelector('input'),
+		negativeTraining = document.querySelector('input'),
 		button = document.querySelector('button');
 
-	button.onclick = () => {
+	window.copyNNToClipboard = function () {
 		let networkJSON = myNetwork.toJSON();
 		let textarea = document.createElement("textarea");
 		textarea.value = JSON.stringify(networkJSON);
@@ -71,23 +93,46 @@ async function createCanvas(stream) {
 		textarea.select();
 		document.execCommand('copy');
 		document.body.removeChild(textarea);
-	};
+	}
 
-	help.innerText = `Use LMB to mark spectrogram column as a negative sample, and CTRL+LMB as a positive sample. Click on spectrogram to save trained network in a localStorage. Use this checkbox when you need to train negative samples, and do not produce target sounds while it is checked:`;
+	window.loadFingerClickNN = function () {
+		localStorage.setItem('myNetwork', window.FingerClickNNText);
+		location.reload();
+	}
+
+	window.clearSavedNN = function () {
+		localStorage.setItem('myNetwork', null);
+		location.reload();
+	}
+
+	help.innerText = `Use LMB to mark spectrogram column as a negativeTraining sample, and CTRL+LMB as a positive sample. Click on spectrogram to save trained network in a localStorage. Use this checkbox when you need to train negativeTraining samples, and do not produce target sounds while it is checked:`;
 
 	let input = context.createMediaStreamSource(stream);
 	let analyser = context.createAnalyser();
-	analyser.fftSize = can.height * 2;
+	analyser.fftSize = 512;
 	input.connect(analyser);
 
+	let col = -1,
+		XSCALE = 8,
+		YSCALE = 2;
+
 	can.onmousemove = e => {
-		can.title = 'Col: ' + e.offsetX + '\nFreq: ' + Math.floor((can.height - e.offsetY) / analyser.fftSize * context.sampleRate);
+		col = (e.offsetX / XSCALE) | 0;
+		let row = ((can.height - e.offsetY) / YSCALE) | 0;
+		let str = 'Col: ' + col + '\nFreq: ' + Math.floor(row / analyser.fftSize * context.sampleRate);
+
+		if (data[col]) {
+			str += '\nVal: ' + data[col].sample[row];
+		}
+
+		can.title = str;
 	};
 
 	let data = [];
 	can.onclick = e => {
-		if (data[e.offsetX]) {
-			trainer.train([ { input: data[e.offsetX], output: [ e.ctrlKey ? 1 : 0 ] } ], { rate: 0.2 });
+		col = (e.offsetX / XSCALE) | 0;
+		if (data[col]) {
+			trainer.train([ { input: data[col].sample, output: [ e.ctrlKey ? 1 : 0 ] } ], { rate: e.ctrlKey ? 0.1 : 0.075 });
 
 			let networkJSON = myNetwork.toJSON();
 			localStorage.setItem('myNetwork', JSON.stringify(networkJSON));
@@ -96,48 +141,77 @@ async function createCanvas(stream) {
 
 	let isUpdating = true;
 	can.addEventListener('mouseover', () => isUpdating = false);
-	can.addEventListener('mouseout', () => isUpdating = true);
+	can.addEventListener('mouseout', () => {
+		isUpdating = true;
+		col = -1;
+	});
 
 	(function update() {
 		if (isUpdating) {
 			let freqByteData = new Uint8Array(can.height);
 			analyser.getByteFrequencyData(freqByteData);
 
-			let sample = getTrainingSample(freqByteData);
-			data.unshift(sample);
-			if (data.length > can.width) data.length = can.width;
+			let sample = [];
+			for (let i = 0; i < 256; i++) {
+				sample[i] = freqByteData[i] / 255;
+			}
 
-
-			if (negative.checked) {
+			if (negativeTraining.checked) {
 				trainer.train([ { input: sample, output: [ 0 ] } ], { rate: 0.02 });
 			}
 
-			ctx.drawImage(can, 1, 0);
-
 			let predictionGood = myNetwork.activate(sample)[0] > 0.9;
 
-			if (negative.checked && predictionGood) {
-				trainer.train([ { input: sample, output: [ 0 ] } ], { rate: 0.1 });
+			if (negativeTraining.checked && predictionGood) {
+				trainer.train([ { input: sample, output: [ 0 ] } ], { rate: 0.05 });
 			}
 
-			for (let i = 0; i < freqByteData.length; i++) {
-				let value = freqByteData[i] / 255;
-				if (predictionGood) {
-					ctx.fillStyle = `hsl(${250 - (value * 360) | 0}, 100%, 60%)`;
-				} else {
-					if (negative.checked) {
-						if (value) {
-							ctx.fillStyle = `hsl(${250 - (value * 360) | 0}, 100%, ${value}%)`;
-						} else {
-							ctx.fillStyle = '#400';
-						}
-					} else {
-						ctx.fillStyle = `hsl(${250 - (value * 360) | 0}, 100%, ${value ? 50 : 0}%)`;
-					}
-				}
-				ctx.fillRect(0, can.height - i, 1, 1);
+			data.unshift({ sample, predictionGood });
+
+			let maxSamples = can.width / XSCALE;
+			if (data.length > maxSamples) {
+				data.length = maxSamples;
 			}
 		}
+
+		for (let x = 0; x < data.length; x++) {
+			let { sample, predictionGood } = data[x];
+
+			for (let y = 0; y < sample.length; y++) {
+				let value = sample[y],
+					h = (250 - (value * 360) | 0) / 360,
+					s = 1,
+					l = 0.5;
+				if (x === col) {
+					if (value) {
+						l = 0.8;
+					} else {
+						l = 1;
+					}
+				} else if (predictionGood) {
+					l = 0.6;
+				} else {
+					if (negativeTraining.checked) {
+						if (value) {
+							l = value;
+						} else {
+							h = 0;
+							s = 0.5;
+							l = 0.3;
+						}
+					} else {
+						if (value) {
+							l = 0.5;
+						} else {
+							l = 0;
+						}
+					}
+				}
+				drawRectangleHSL(imgData, x * XSCALE, can.height - y * YSCALE, XSCALE, YSCALE, h, s, l);
+			}
+		}
+
+		ctx.putImageData(imgData, 0, 0);
 
 		setTimeout(update, 10);
 	})();
