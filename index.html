@@ -81,7 +81,7 @@ function drawRectangleHSL(imgData, x, y, width, height, h, s, l) {
 async function createCanvas(stream) {
 	let context = new AudioContext();
 
-	document.body.innerHTML = '<span></span><input type="checkbox" /><br /><canvas height="512" width="1024"></canvas><br /><button onclick="copyNNToClipboard()">Copy to clipboard</button><button onclick="loadFingerClickNN()">Load Finger Click NN</button><button onclick="clearSavedNN()">Clear saved data</button>';
+	document.body.innerHTML = '<span></span><input type="checkbox" /><br /><canvas height="512" width="1024"></canvas><br /><button onclick="copyNNToClipboard()">Copy to clipboard</button><button onclick="loadFingerClickNN()">Load Finger Click NN</button><button onclick="clearSavedNN()">Clear saved data</button><br /><a href="https://github.com/alexanderbrodko/fingerclick.js">GitHub</a>';
 
 	let can = document.querySelector('canvas'),
 		ctx = can.getContext('2d'),
