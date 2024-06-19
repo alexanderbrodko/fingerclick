@@ -110,7 +110,7 @@ async function createCanvas(stream) {
 		location.reload();
 	}
 
-	help.innerText = `Use LMB to mark spectrogram column as a negativeTraining sample, and CTRL+LMB as a positive sample. Click on spectrogram to save trained network in a localStorage. Use this checkbox when you need to train negativeTraining samples, and do not produce target sounds while it is checked:`;
+	help.innerText = `Use LMB to mark spectrogram column as a negative sample, and CTRL+LMB as a positive sample. Click on spectrogram to save trained network in a localStorage. Use this checkbox when you need to train negative samples, and do not produce target sounds while it is checked:`;
 
 	let input = context.createMediaStreamSource(stream);
 	let analyser = context.createAnalyser();
