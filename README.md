@@ -1,4 +1,5 @@
-# fingerclick.js
+https://alexanderbrodko.github.io/fingerclick.js/
+
 AI sound recognition training tool in browser. Click "Start" and approve using microphone, then you can see a sound spectrum. You can mark a spectrogram column as a positive or negative trainging sample. Or use a checkbox to automatically mark all new samples as negative.
 
 You can also load a neural network which detects finger snaps. You can train it more for a personal purposes.
