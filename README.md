@@ -1,4 +1,4 @@
-https://alexanderbrodko.github.io/fingerclick.js/
+https://alexanderbrodko.github.io/fingerclick/
 
 AI sound recognition training tool in browser. Click "Start" and approve using microphone, then you can see a sound spectrum. You can mark a spectrogram column as a positive or negative trainging sample. Or use a checkbox to automatically mark all new samples as negative.
 
