@@ -124,7 +124,7 @@ async function createCanvas(stream) {
 	window.copyWeightsToClipboard = function () {
 		let arr = [];
 		for (let name in window.FingerClickNN) {
-			arr.push('"' + name + '": "' + localStorage.getItem('tensorflowjs_models/myModel/' + name) + '"');
+			arr.push('"' + name + '": "' + btoa(localStorage.getItem('tensorflowjs_models/myModel/' + name)) + '"');
 		}
 		let text = '{' + arr.join(',') + '}';
 
@@ -138,7 +138,7 @@ async function createCanvas(stream) {
 
 	window.loadFingerClickNN = function () {
 		for (let name in window.FingerClickNN) {
-			localStorage.setItem('tensorflowjs_models/myModel/' + name, window.FingerClickNN[name]);
+			localStorage.setItem('tensorflowjs_models/myModel/' + name, atob(window.FingerClickNN[name]));
 		}
 		location.reload();
 	};
