@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html>
 	<head>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/synaptic/1.1.4/synaptic.min.js" integrity="sha512-nPPVw7EH/K4lr+WhkZHqsR2ZxKB7ROCLGLLdmHGR4vHdv/c+fYluZACzQqRQWGD5ehCBnlrxHzrQYNwKT319bA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script src="fingerclicknn.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
 		<style>
 			body {
 				width: 1036px;
@@ -13,27 +13,36 @@
 		<button onclick="start()">Start using mic</button>
 		<script type="text/javascript">
 
-let myNetwork;
+let model;
 
-try {
-	let loadedNetworkJSON = JSON.parse(localStorage.getItem('myNetwork'));
-	myNetwork = synaptic.Network.fromJSON(loadedNetworkJSON);
-} catch(e) {
-	let inputLayer = new synaptic.Layer(128);
-	let hiddenLayer = new synaptic.Layer(64);
-	let outputLayer = new synaptic.Layer(1);
+	(async () => {
+		try {
+	    	model = await tf.loadLayersModel('localstorage://myModel');
+	    } catch(e) {
+		    model = tf.sequential();
+			model.add(tf.layers.conv1d({
+				inputShape: [256, 1],
+				kernelSize: 3,
+				filters: 32,
+				activation: 'relu',
+			}));
+			model.add(tf.layers.maxPooling1d({
+				poolSize: 2,
+				strides: 2,
+			}));
+			model.add(tf.layers.flatten());
+			model.add(tf.layers.dense({
+				units: 1,
+				activation: 'sigmoid'
+			}));
+		}
 
-	inputLayer.project(hiddenLayer);
-	hiddenLayer.project(outputLayer);
-
-	myNetwork = new synaptic.Network({
-		input: inputLayer,
-		hidden: [hiddenLayer],
-		output: outputLayer
-	});
-}
-
-let trainer = new synaptic.Trainer(myNetwork);
+		model.compile({
+			optimizer: tf.train.adam(0.001),
+			loss: 'binaryCrossentropy',
+			metrics: ['accuracy']
+		});
+	})();
 
 function hslToRgb(h, s, l) {
     let r, g, b;
@@ -81,36 +90,67 @@ function drawRectangleHSL(imgData, x, y, width, height, h, s, l) {
 async function createCanvas(stream) {
 	let context = new AudioContext();
 
-	document.body.innerHTML = '<span></span><input type="checkbox" /><br /><canvas height="512" width="1024"></canvas><br /><button onclick="copyNNToClipboard()">Copy to clipboard</button><button onclick="loadFingerClickNN()">Load Finger Click NN</button><button onclick="clearSavedNN()">Clear saved data</button><br /><a href="https://github.com/alexanderbrodko/fingerclick">GitHub</a>';
+	document.body.innerHTML = '<span>Use LMB to mark spectrogram column as a positive sample, and this checkbox when you need to train negative samples (do not produce target sounds while it is checked):</span><input type="checkbox" /><br /><canvas height="512" width="1024"></canvas><br /><button onclick="copyWeightsToClipboard()">Copy weights to clipboard</button><button onclick="loadFingerClickNN()">Load Finger Click NN</button><button onclick="clearSavedNN()">Clear saved data</button><br /><a href="https://github.com/alexanderbrodko/fingerclick">GitHub</a>';
 
 	let can = document.querySelector('canvas'),
 		ctx = can.getContext('2d'),
 		imgData = ctx.createImageData(1024, 512),
-		help = document.querySelector('span'),
 		negativeTraining = document.querySelector('input'),
 		button = document.querySelector('button');
 
-	window.copyNNToClipboard = function () {
-		let networkJSON = myNetwork.toJSON();
+	negativeTraining.onchange = () => {
+		if (!negativeTraining.checked) {
+			let trainData = [];
+			let trainLabels = [];
+
+			for (let item of data) {
+				if (!item.negativeTrained) break;
+
+			    trainData.push(item.trainData);
+			    trainLabels.push(0);
+			}
+
+			trainData = tf.concat(trainData, 0);
+			trainLabels = tf.tensor1d(trainLabels);
+
+			model.fit(trainData, trainLabels, {
+			    epochs: 50,
+			    shuffle: true,
+			    validationSplit: 0.1
+			});
+		}
+	};
+
+	window.copyWeightsToClipboard = function () {
+		let arr = [];
+		for (let name in window.FingerClickNN) {
+			if (name === 'weight_data') {
+				arr.push('"' + name + '": "' + localStorage.getItem('tensorflowjs_models/myModel/' + name) + '"');
+			} else {
+				arr.push('"' + name + '":' + localStorage.getItem('tensorflowjs_models/myModel/' + name));
+			}
+		}
+		let text = '{' + arr.join(',') + '}';
+
 		let textarea = document.createElement("textarea");
-		textarea.value = JSON.stringify(networkJSON);
+		textarea.value = text;
 		document.body.appendChild(textarea);
 		textarea.select();
 		document.execCommand('copy');
 		document.body.removeChild(textarea);
-	}
+	};
 
 	window.loadFingerClickNN = function () {
-		localStorage.setItem('myNetwork', window.FingerClickNNText);
+		for (let name in window.FingerClickNN) {
+			localStorage.setItem('tensorflowjs_models/myModel/' + name, window.FingerClickNN[name]);
+		}
 		location.reload();
-	}
+	};
 
 	window.clearSavedNN = function () {
-		localStorage.setItem('myNetwork', null);
+		localStorage.clear();
 		location.reload();
-	}
-
-	help.innerText = `Use LMB to mark spectrogram column as a negative sample, and CTRL+LMB as a positive sample. Click on spectrogram to save trained network in a localStorage. Use this checkbox when you need to train negative samples, and do not produce target sounds while it is checked:`;
+	};
 
 	let input = context.createMediaStreamSource(stream);
 	let analyser = context.createAnalyser();
@@ -137,16 +177,15 @@ async function createCanvas(stream) {
 	can.onclick = e => {
 		col = (e.offsetX / XSCALE) | 0;
 		if (data[col]) {
-			trainer.train([ { input: data[col].sample, output: [ e.ctrlKey ? 1 : 0 ] } ], { rate: e.ctrlKey ? 0.1 : 0.075 });
+			let trainLabels = tf.tensor1d([1]);
+			model.fit(data[col].trainData, trainLabels, {
+			    epochs: 1,
+			    validationSplit: 1
+			});
 
-			if (e.ctrlKey) {
-				data[col].positiveTrained = true;
-			} else {
-				data[col].negativeTrained = true;
-			}
+			data[col].positiveTrained = true;
 
-			let networkJSON = myNetwork.toJSON();
-			localStorage.setItem('myNetwork', JSON.stringify(networkJSON));
+			model.save('localstorage://myModel');
 		}
 	};
 
@@ -166,18 +205,11 @@ async function createCanvas(stream) {
 			for (let i = 0; i < 256; i++) {
 				sample[i] = freqByteData[i] / 255;
 			}
+			let trainData = tf.tensor3d(sample, [1, 256, 1]);
 
-			if (negativeTraining.checked) {
-				trainer.train([ { input: sample, output: [ 0 ] } ], { rate: 0.02 });
-			}
+			let predictionGood = model.predict(trainData).dataSync()[0] > 0.9;
 
-			let predictionGood = myNetwork.activate(sample)[0] > 0.9;
-
-			if (negativeTraining.checked && predictionGood) {
-				trainer.train([ { input: sample, output: [ 0 ] } ], { rate: 0.05 });
-			}
-
-			data.unshift({ sample, predictionGood, negativeTrained: negativeTraining.checked });
+			data.unshift({ sample, trainData, predictionGood, negativeTrained: negativeTraining.checked });
 
 			let maxSamples = can.width / XSCALE;
 			if (data.length > maxSamples) {
@@ -186,7 +218,7 @@ async function createCanvas(stream) {
 		}
 
 		for (let x = 0; x < data.length; x++) {
-			let { sample, predictionGood, negativeTrained, positiveTrained } = data[x];
+			let { sample, gradient, predictionGood, negativeTrained, positiveTrained } = data[x];
 
 			for (let y = 0; y < sample.length; y++) {
 				let value = sample[y],
