@@ -124,11 +124,7 @@ async function createCanvas(stream) {
 	window.copyWeightsToClipboard = function () {
 		let arr = [];
 		for (let name in window.FingerClickNN) {
-			if (name === 'weight_data') {
-				arr.push('"' + name + '": "' + localStorage.getItem('tensorflowjs_models/myModel/' + name) + '"');
-			} else {
-				arr.push('"' + name + '":' + localStorage.getItem('tensorflowjs_models/myModel/' + name));
-			}
+			arr.push('"' + name + '": "' + localStorage.getItem('tensorflowjs_models/myModel/' + name) + '"');
 		}
 		let text = '{' + arr.join(',') + '}';
 
